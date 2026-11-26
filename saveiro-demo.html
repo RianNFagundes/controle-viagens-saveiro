@@ -34,7 +34,7 @@
 <main>
   <header>
     <h1>Controle de viagens da Saveiro</h1>
-    <p>Demonstração de portfólio. Use dados fictícios. Os registros ficam neste navegador.</p>
+    <p>Use dados fictícios. O histórico é salvo neste navegador.</p>
   </header>
   <p id="feedback" role="status" aria-live="polite"></p>
   <section id="departure-panel">
@@ -84,7 +84,6 @@
   const feedback = document.getElementById('feedback');
   const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
   const kmFormat = new Intl.NumberFormat('pt-BR');
-  let trips = [];
 
   function report(message, isError = false) {
     feedback.textContent = message;
@@ -92,15 +91,17 @@
   }
 
   function loadTrips() {
-    return JSON.parse(localStorage.getItem(storageKey) || '[]');
+    const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+    if (!Array.isArray(saved)) throw new Error('Histórico inválido');
+    return saved;
   }
 
-  function activeTrip() {
+  function activeTrip(trips) {
     return trips.find(trip => !trip.returnAt);
   }
 
-  function render() {
-    const active = activeTrip();
+  function render(trips) {
+    const active = activeTrip(trips);
     document.getElementById('departure-panel').hidden = Boolean(active);
     document.getElementById('return-panel').hidden = !active;
     if (active) {
@@ -133,11 +134,9 @@
     }
   }
 
-  function save(nextTrips, message) {
-    localStorage.setItem(storageKey, JSON.stringify(nextTrips));
-    trips = nextTrips;
-    render();
-    report(message);
+  function save(trips) {
+    localStorage.setItem(storageKey, JSON.stringify(trips));
+    render(trips);
   }
 
   function readForm(form) {
@@ -152,9 +151,9 @@
       return;
     }
     try {
-      trips = loadTrips();
-      if (activeTrip()) {
-        render();
+      const trips = loadTrips();
+      if (activeTrip(trips)) {
+        render(trips);
         report('Já existe uma viagem em andamento.', true);
         return;
       }
@@ -162,7 +161,8 @@
         driver, department, city, destination, purpose,
         startKm: Number(mileage), startFuel: Number(fuel),
         departureAt: new Date().toISOString(),
-      }], 'Saída registrada.');
+      }]);
+      report('Saída registrada.');
       departure.reset();
       arrival.elements.mileage.focus();
     } catch {
@@ -174,10 +174,10 @@
     event.preventDefault();
     const { mileage, fuel, notes } = readForm(arrival);
     try {
-      trips = loadTrips();
-      const active = activeTrip();
+      const trips = loadTrips();
+      const active = activeTrip(trips);
       if (!active) {
-        render();
+        render(trips);
         report('A viagem já foi encerrada.', true);
         return;
       }
@@ -189,7 +189,8 @@
         ...active, endKm: Number(mileage), endFuel: Number(fuel),
         notes, returnAt: new Date().toISOString(),
       };
-      save(trips.map(trip => trip === active ? finished : trip), 'Retorno registrado.');
+      save(trips.map(trip => trip === active ? finished : trip));
+      report('Retorno registrado.');
       arrival.reset();
       departure.elements.driver.focus();
     } catch {
@@ -197,19 +198,18 @@
     }
   });
 
-  window.addEventListener('storage', event => {
-    if (event.key === storageKey) {
-      trips = loadTrips();
-      render();
+  function refreshHistory() {
+    try {
+      render(loadTrips());
+    } catch {
+      report('Não foi possível ler os registros deste navegador.', true);
     }
-  });
-
-  try {
-    trips = loadTrips();
-    render();
-  } catch {
-    report('Não foi possível ler os registros deste navegador.', true);
   }
+
+  window.addEventListener('storage', event => {
+    if (event.key === storageKey || event.key === null) refreshHistory();
+  });
+  refreshHistory();
 </script>
 </body>
 </html>
