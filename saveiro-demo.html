@@ -201,6 +201,7 @@
   function refreshHistory() {
     try {
       render(loadTrips());
+      if (feedback.classList.contains('error')) report('');
     } catch {
       report('Não foi possível ler os registros deste navegador.', true);
     }
