@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controle de viagens da Saveiro | Demonstração</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef3f5; color: #14252c; font: 1rem/1.5 system-ui, sans-serif; }
+    main { max-width: 920px; margin: auto; padding: 2rem 1rem 3rem; }
+    header { background: #10343e; color: #fff; border-radius: 1rem; padding: 1.5rem; }
+    header p { color: #daebef; margin: .4rem 0 0; }
+    h1, h2 { line-height: 1.2; margin: 0 0 .8rem; }
+    h1 { font-size: clamp(1.65rem, 5vw, 2.6rem); }
+    h2 { font-size: 1.25rem; }
+    section { margin-top: 1rem; background: white; border: 1px solid #cbd9de; border-radius: 1rem; padding: 1.25rem; }
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .75rem 1rem; }
+    label { display: grid; gap: .3rem; font-weight: 600; }
+    input, textarea, button { font: inherit; }
+    input, textarea { width: 100%; min-height: 2.75rem; border: 1px solid #728990; border-radius: .5rem; padding: .5rem .65rem; color: inherit; }
+    button { border: 0; border-radius: .5rem; padding: .65rem 1rem; color: white; background: #11604f; font-weight: 700; cursor: pointer; margin-top: 1rem; }
+    :focus-visible { outline: 3px solid #2357ae; outline-offset: 3px; }
+    .table { overflow: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { padding: .6rem; border-bottom: 1px solid #d9e3e6; }
+    th { font-size: .9rem; background: #edf5f4; }
+    #feedback { min-height: 1.5em; color: #164d3b; }
+    #feedback.error { color: #a12724; }
+    .context { color: #42585f; margin: 0 0 1rem; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Controle de viagens da Saveiro</h1>
+    <p>Demonstração de portfólio. Use dados fictícios. Os registros ficam neste navegador.</p>
+  </header>
+  <p id="feedback" role="status" aria-live="polite"></p>
+  <section id="departure-panel">
+    <h2>Registrar saída</h2>
+    <form id="departure">
+      <div class="fields">
+        <label>Motorista<input name="driver" required maxlength="80" placeholder="Ex.: Motorista A"></label>
+        <label>Setor<input name="department" required maxlength="80" placeholder="Ex.: Operações"></label>
+        <label>Cidade<input name="city" required maxlength="80"></label>
+        <label>Local ou fornecedor<input name="destination" required maxlength="100"></label>
+        <label>Objetivo<input name="purpose" required maxlength="160"></label>
+        <label>Hodômetro de saída (km)<input name="mileage" type="number" min="0" max="9999999" step="1" required></label>
+        <label>Combustível na saída (%)<input name="fuel" type="number" min="0" max="100" step="1" required></label>
+      </div>
+      <button>Registrar saída</button>
+    </form>
+  </section>
+  <section id="return-panel" hidden>
+    <h2>Registrar retorno</h2>
+    <p class="context" id="active-trip"></p>
+    <form id="return-form">
+      <div class="fields">
+        <label>Hodômetro de retorno (km)<input name="mileage" type="number" min="0" max="9999999" step="1" required></label>
+        <label>Combustível no retorno (%)<input name="fuel" type="number" min="0" max="100" step="1" required></label>
+        <label>Observações<textarea name="notes" maxlength="240" rows="1"></textarea></label>
+      </div>
+      <button>Registrar retorno</button>
+    </form>
+  </section>
+  <section>
+    <h2>Histórico de viagens</h2>
+    <p id="summary" class="context"></p>
+    <div class="table" tabindex="0" aria-label="Histórico de viagens">
+      <table>
+        <thead>
+          <tr><th scope="col">Motorista / setor</th><th scope="col">Destino / objetivo</th><th scope="col">Saída</th><th scope="col">Retorno</th><th scope="col">Distância</th><th scope="col">Combustível</th><th scope="col">Status</th><th scope="col">Observações</th></tr>
+        </thead>
+        <tbody id="trip-history"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script>
+  const storageKey = 'portfolio-saveiro-trips-v1';
+  const departure = document.getElementById('departure');
+  const arrival = document.getElementById('return-form');
+  const feedback = document.getElementById('feedback');
+  const dateFormat = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+  const kmFormat = new Intl.NumberFormat('pt-BR');
+  let trips = [];
+
+  function report(message, isError = false) {
+    feedback.textContent = message;
+    feedback.classList.toggle('error', isError);
+  }
+
+  function loadTrips() {
+    return JSON.parse(localStorage.getItem(storageKey) || '[]');
+  }
+
+  function activeTrip() {
+    return trips.find(trip => !trip.returnAt);
+  }
+
+  function render() {
+    const active = activeTrip();
+    document.getElementById('departure-panel').hidden = Boolean(active);
+    document.getElementById('return-panel').hidden = !active;
+    if (active) {
+      document.getElementById('active-trip').textContent =
+        `${active.driver} · ${active.city} · Saída com ${kmFormat.format(active.startKm)} km`;
+      arrival.elements.mileage.min = active.startKm;
+    }
+
+    const history = document.getElementById('trip-history');
+    history.replaceChildren();
+    const finished = trips.filter(trip => trip.returnAt);
+    const totalKm = finished.reduce((total, trip) => total + trip.endKm - trip.startKm, 0);
+    document.getElementById('summary').textContent = trips.length
+      ? `${finished.length} de ${trips.length} viagens concluídas · ${kmFormat.format(totalKm)} km rodados`
+      : 'Nenhuma viagem registrada.';
+
+    for (const trip of [...trips].reverse()) {
+      const row = history.insertRow();
+      const values = [
+        `${trip.driver} · ${trip.department}`,
+        `${trip.city} / ${trip.destination} · ${trip.purpose}`,
+        dateFormat.format(new Date(trip.departureAt)),
+        trip.returnAt ? dateFormat.format(new Date(trip.returnAt)) : '—',
+        trip.returnAt ? `${kmFormat.format(trip.endKm - trip.startKm)} km` : '—',
+        trip.returnAt ? `${trip.startFuel}% → ${trip.endFuel}%` : `${trip.startFuel}% na saída`,
+        trip.returnAt ? 'Concluída' : 'Em andamento',
+        trip.notes || '—',
+      ];
+      for (const value of values) row.insertCell().textContent = value;
+    }
+  }
+
+  function save(nextTrips, message) {
+    localStorage.setItem(storageKey, JSON.stringify(nextTrips));
+    trips = nextTrips;
+    render();
+    report(message);
+  }
+
+  function readForm(form) {
+    return Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, value.trim()]));
+  }
+
+  departure.addEventListener('submit', event => {
+    event.preventDefault();
+    const { driver, department, city, destination, purpose, mileage, fuel } = readForm(departure);
+    if (![driver, department, city, destination, purpose].every(Boolean)) {
+      report('Preencha os dados da saída.', true);
+      return;
+    }
+    try {
+      trips = loadTrips();
+      if (activeTrip()) {
+        render();
+        report('Já existe uma viagem em andamento.', true);
+        return;
+      }
+      save([...trips, {
+        driver, department, city, destination, purpose,
+        startKm: Number(mileage), startFuel: Number(fuel),
+        departureAt: new Date().toISOString(),
+      }], 'Saída registrada.');
+      departure.reset();
+      arrival.elements.mileage.focus();
+    } catch {
+      report('Não foi possível salvar no armazenamento do navegador.', true);
+    }
+  });
+
+  arrival.addEventListener('submit', event => {
+    event.preventDefault();
+    const { mileage, fuel, notes } = readForm(arrival);
+    try {
+      trips = loadTrips();
+      const active = activeTrip();
+      if (!active) {
+        render();
+        report('A viagem já foi encerrada.', true);
+        return;
+      }
+      if (Number(mileage) < active.startKm) {
+        report('O hodômetro de retorno deve ser igual ou superior ao de saída.', true);
+        return;
+      }
+      const finished = {
+        ...active, endKm: Number(mileage), endFuel: Number(fuel),
+        notes, returnAt: new Date().toISOString(),
+      };
+      save(trips.map(trip => trip === active ? finished : trip), 'Retorno registrado.');
+      arrival.reset();
+      departure.elements.driver.focus();
+    } catch {
+      report('Não foi possível salvar no armazenamento do navegador.', true);
+    }
+  });
+
+  window.addEventListener('storage', event => {
+    if (event.key === storageKey) {
+      trips = loadTrips();
+      render();
+    }
+  });
+
+  try {
+    trips = loadTrips();
+    render();
+  } catch {
+    report('Não foi possível ler os registros deste navegador.', true);
+  }
+</script>
+</body>
+</html>
